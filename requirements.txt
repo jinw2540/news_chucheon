@@ -1,0 +1,15 @@
+# 웹·API 서버
+fastapi
+uvicorn[standard]
+# RSS·날씨 요청
+httpx
+# 1시간마다 수집 같은 예약 작업
+apscheduler
+# 3단계: 기사·관심사 벡터 (e5-small 8비트 ONNX, PyTorch 없이)
+onnxruntime
+tokenizers
+numpy
+# 4단계: 추천 기사 본문 추출 + AI 요약
+trafilatura
+openai
+python-dotenv

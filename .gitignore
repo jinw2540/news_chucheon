@@ -1,0 +1,10 @@
+# 가상환경
+.venv/
+__pycache__/
+
+# DB와 모델 파일 (PLAN.md 7-6)
+data/
+models/
+
+# API 키
+.env

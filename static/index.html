@@ -1,0 +1,119 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>아침 브리핑</title>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/static/pretendard.min.css">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div class="page">
+    <header class="masthead">
+      <div class="top-row">
+        <p class="date"><span id="date"></span></p>
+        <div class="top-actions">
+          <button class="weather-chip" id="weather" type="button"></button>
+          <button class="icon-btn" id="open-settings" type="button" aria-label="관심사 설정"></button>
+        </div>
+      </div>
+      <h1 class="nameplate">아침 브리핑</h1>
+      <p class="greeting" id="greeting">좋은 아침이에요</p>
+    </header>
+
+    <main class="layout">
+      <section class="briefing" aria-labelledby="briefing-title">
+        <div class="section-head">
+          <h2 id="briefing-title">오늘의 브리핑</h2>
+          <span class="progress-text" id="progress-text"></span>
+        </div>
+        <div class="progress-bar" aria-hidden="true"><span id="progress-fill"></span></div>
+        <p class="briefing-note" id="briefing-note"></p>
+        <ol class="cards" id="cards"></ol>
+      </section>
+
+      <section class="browse" aria-labelledby="browse-title">
+        <h2 class="sr-only" id="browse-title">분야별 뉴스</h2>
+        <div class="tabs-bar">
+          <div class="tabs" id="tabs" role="tablist" aria-label="뉴스 분야"></div>
+          <button class="filter-btn" id="open-filter" type="button">
+            <span id="filter-icon" aria-hidden="true"></span><span id="filter-label">필터</span>
+          </button>
+        </div>
+        <ul class="list" id="list"></ul>
+      </section>
+    </main>
+
+    <footer class="foot" id="foot"></footer>
+  </div>
+
+  <!-- 아래에서 올라오는 시트들 -->
+  <div class="backdrop" id="backdrop"></div>
+
+  <div class="sheet" id="sheet-onboarding" role="dialog" aria-modal="true" aria-labelledby="ob-title" inert>
+    <div class="sheet-handle" aria-hidden="true"></div>
+    <h2 id="ob-title">어떤 뉴스가 궁금하세요?</h2>
+    <p class="sheet-desc">골라 주시면 아침마다 맞춰 드릴게요. 나중에 언제든 바꿀 수 있어요.</p>
+    <div class="chips" id="ob-chips"></div>
+    <div class="add-row">
+      <input id="ob-custom" type="text" placeholder="직접 입력 (예: 전세 시장)" autocomplete="off">
+      <button class="btn-ghost" id="ob-add" type="button">추가</button>
+    </div>
+    <div class="sheet-actions">
+      <button class="btn-ghost" id="ob-later" type="button">나중에</button>
+      <button class="btn-primary" id="ob-start" type="button">시작하기</button>
+    </div>
+  </div>
+
+  <div class="sheet" id="sheet-settings" role="dialog" aria-modal="true" aria-labelledby="st-title" inert>
+    <div class="sheet-handle" aria-hidden="true"></div>
+    <div class="sheet-title-row">
+      <h2 id="st-title">관심사 설정</h2>
+      <button class="icon-btn" data-close type="button" aria-label="닫기"></button>
+    </div>
+    <h3 class="field-label">관심 있는 것</h3>
+    <div class="chips" id="st-chips"></div>
+    <div class="add-row">
+      <input id="st-custom" type="text" placeholder="직접 입력 (예: 전세 시장)" autocomplete="off">
+      <button class="btn-ghost" id="st-add" type="button">추가</button>
+    </div>
+    <h3 class="field-label">관심 없는 것</h3>
+    <input id="st-dislikes" type="text" placeholder="구체적일수록 잘 걸러져요 (예: 연예인 열애, 코인)" autocomplete="off">
+    <div class="sheet-actions">
+      <button class="btn-text-danger" id="st-reset" type="button">내 기록 전체 삭제</button>
+      <button class="btn-primary" id="st-save" type="button">저장</button>
+    </div>
+  </div>
+
+  <div class="sheet" id="sheet-filter" role="dialog" aria-modal="true" aria-labelledby="ft-title" inert>
+    <div class="sheet-handle" aria-hidden="true"></div>
+    <div class="sheet-title-row">
+      <h2 id="ft-title">언론사 필터</h2>
+      <button class="icon-btn" data-close type="button" aria-label="닫기"></button>
+    </div>
+    <p class="sheet-desc">분야별 뉴스에 보여 줄 언론사를 고르세요.</p>
+    <div class="source-grid" id="ft-sources"></div>
+    <div class="sheet-actions">
+      <div class="inline-btns">
+        <button class="btn-ghost" id="ft-all" type="button">모두 선택</button>
+        <button class="btn-ghost" id="ft-none" type="button">모두 해제</button>
+      </div>
+      <button class="btn-primary" data-close type="button">완료</button>
+    </div>
+  </div>
+
+  <div class="sheet sheet-wide" id="sheet-taste" role="dialog" aria-modal="true" aria-labelledby="tt-title" inert>
+    <div class="sheet-handle" aria-hidden="true"></div>
+    <div class="sheet-title-row">
+      <h2 id="tt-title">내 취향</h2>
+      <button class="icon-btn" data-close type="button" aria-label="닫기"></button>
+    </div>
+    <p class="sheet-desc">추천할 때 실제로 계산한 점수를 그대로 보여 드려요.</p>
+    <div id="tt-body"></div>
+  </div>
+
+  <div class="toast" id="toast" role="status" aria-live="polite"></div>
+
+  <script src="app.js"></script>
+</body>
+</html>
