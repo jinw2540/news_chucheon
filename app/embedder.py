@@ -1,6 +1,9 @@
-"""multilingual-e5-small(8비트 ONNX)로 기사·관심사를 384차원 벡터로 바꾼다.
+"""multilingual-e5-small(ONNX)로 기사·관심사를 384차원 벡터로 바꾼다.
 
-PyTorch 없이 ONNX Runtime만 사용해 작은 서버에서도 돌아가게 한다 (PLAN.md 4-2, 7-3).
+PyTorch 없이 ONNX Runtime만 사용한다 (PLAN.md 4-2).
+- EMBED_VARIANT=int8 (기본, 로컬 개발 서버): 8비트 압축 모델 118MB
+- EMBED_VARIANT=fp32 (GitHub Actions 파이프라인): 원본 32비트 모델 470MB.
+  Hugging Face API(hf-inference)와 **같은 벡터**를 냄 (2026-11-09 측정: 유사도 1.0) → API로 만든 관심사 벡터와 정확히 비교 가능
 - 기사는 "passage: ", 관심사는 "query: "를 앞에 붙인다 (e5 모델 사용 규칙)
 - 벡터는 길이 1로 정규화하므로 내적 = 코사인 유사도
 - DB에는 float16(768바이트)으로 저장
@@ -8,6 +11,7 @@ PyTorch 없이 ONNX Runtime만 사용해 작은 서버에서도 돌아가게 한
 모델 내려받기: .venv/bin/python -m app.embedder download
 """
 import logging
+import os
 import threading
 from pathlib import Path
 
@@ -20,7 +24,12 @@ log = logging.getLogger("embedder")
 
 MODEL_DIR = db.ROOT / "models" / "multilingual-e5-small"
 HF_BASE = "https://huggingface.co/Xenova/multilingual-e5-small/resolve/main"
-FILES = {"model.onnx": "onnx/model_quantized.onnx", "tokenizer.json": "tokenizer.json"}
+VARIANT = os.getenv("EMBED_VARIANT", "int8")
+MODEL_FILE = {"int8": "model.onnx", "fp32": "model_fp32.onnx"}[VARIANT]
+FILES = {
+    MODEL_FILE: {"int8": "onnx/model_quantized.onnx", "fp32": "onnx/model.onnx"}[VARIANT],
+    "tokenizer.json": "tokenizer.json",
+}
 DIM = 384
 BATCH = 32
 MAX_TOKENS = {"passage": 192, "query": 32}
@@ -57,7 +66,7 @@ class _Model:
 
         opts = ort.SessionOptions()
         opts.intra_op_num_threads = 2   # 작은 서버(1~2코어) 기준
-        self.session = ort.InferenceSession(str(MODEL_DIR / "model.onnx"), opts, providers=["CPUExecutionProvider"])
+        self.session = ort.InferenceSession(str(MODEL_DIR / MODEL_FILE), opts, providers=["CPUExecutionProvider"])
         self.input_names = {i.name for i in self.session.get_inputs()}
         self.tokenizer = Tokenizer.from_file(str(MODEL_DIR / "tokenizer.json"))
         self.tokenizer.enable_padding(pad_id=1, pad_token="<pad>")

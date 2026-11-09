@@ -1,4 +1,4 @@
-// 아침 브리핑 화면 — 서버 API(/api/...)에서 데이터를 받아 그린다.
+// 아침 브리핑 화면 — datasource.js가 주는 데이터(기사 파일 + 브라우저 추천 계산)로 그린다.
 (() => {
   "use strict";
 
@@ -14,31 +14,9 @@
     check: svg('<path d="M20 6 9 17l-5-5"/>'),
   };
 
-  // ── 서버 요청 ─────────────────────────────────────────
-  async function request(method, path, body) {
-    const res = await fetch(path, {
-      method,
-      headers: body ? { "Content-Type": "application/json" } : undefined,
-      body: body ? JSON.stringify(body) : undefined,
-    });
-    if (!res.ok) throw new Error(`${res.status} ${path}`);
-    return res.json();
-  }
-  const api = {
-    meta: () => request("GET", "/api/meta"),
-    weather: () => request("GET", "/api/weather"),
-    profile: () => request("GET", "/api/profile"),
-    saveProfile: (p) => request("PUT", "/api/profile", p),
-    recommendations: () => request("GET", "/api/recommendations"),
-    articles: (category, sources) => {
-      const q = new URLSearchParams({ category });
-      if (sources) q.set("sources", sources.join(","));
-      return request("GET", `/api/articles?${q}`);
-    },
-    events: (events) => request("POST", "/api/events", { events }),
-    deleteMe: () => request("DELETE", "/api/me"),
-    taste: () => request("GET", "/api/taste"),
-  };
+  // ── 데이터 ───────────────────────────────────────────
+  // datasource.js: 데이터 파일 + 브라우저 추천 계산 + Netlify 함수 (예전 /api/... 와 같은 모양으로 답함)
+  const api = window.BriefingData;
 
   // ── 화면 설정 (이 기기에만 저장: 마지막 탭, 언론사 필터) ──
   const UI_KEY = "briefing-ui-v1";
@@ -89,7 +67,7 @@
   const visibleRecs = () => state.recs.filter((r) => !state.gone.has(r.id));
 
   function send(events) {
-    api.events(events).catch(() => toast("기록을 저장하지 못했어요. 서버 연결을 확인해 주세요."));
+    api.events(events).catch(() => {});   // 이 기기에는 바로 반영, 서버로는 실패하면 다음에 다시 보냄
   }
 
   // ── 헤더 ──────────────────────────────────────────────
@@ -225,34 +203,8 @@
     renderBriefing();
     // 노출 기록: 나중에 "보여줬지만 누르지 않은 기사"를 학습에 씀
     send(state.recs.map((r) => ({ article_id: r.id, type: "impression" })));
-    pollSummaries();
   }
 
-  // AI 요약이 백그라운드에서 끝나면 그 자리에 바꿔 끼움 (3초마다, 최대 2분)
-  let pollTimer;
-  function pollSummaries(tries = 0) {
-    clearTimeout(pollTimer);
-    const pending = state.recs.map((r) => state.byId.get(r.id)).filter((a) => a && a.summary_status === "pending");
-    if (!pending.length || tries >= 40) return;
-    pollTimer = setTimeout(async () => {
-      try {
-        const data = await request("GET", `/api/summaries?ids=${pending.map((a) => a.id).join(",")}`);
-        for (const s of data.items) {
-          const a = state.byId.get(s.id);
-          if (!a || s.summary_status === "pending") continue;
-          Object.assign(a, s);
-          const node = document.querySelector(`.card[data-id="${s.id}"]`);
-          if (!node) continue;
-          const old = node.querySelector(".summary");
-          const fresh = summaryNode(a);
-          if (old && fresh) old.replaceWith(fresh);
-          else if (old) old.remove();
-          else if (fresh) node.querySelector(".card-title").after(fresh);
-        }
-      } catch { /* 다음 확인 때 다시 시도 */ }
-      pollSummaries(tries + 1);
-    }, 3000);
-  }
 
   // ── 행동 ──────────────────────────────────────────────
   function markRead(id) {
@@ -360,9 +312,9 @@
     const lines = [];
     if (updated) {
       const t = new Date(updated).toLocaleString("ko-KR", { month: "numeric", day: "numeric", hour: "numeric", minute: "2-digit" });
-      const stale = Date.now() - Date.parse(updated) > 2 * 3600 * 1000;
+      const stale = Date.now() - Date.parse(updated) > 26 * 3600 * 1000;   // 매일 07시 갱신 + 여유
       lines.push(el("p", { class: stale ? "stale" : null },
-        `뉴스 업데이트 ${t}`, stale && " · 업데이트가 늦어지고 있어요"));
+        `뉴스 업데이트 ${t} · 매일 오전 7시에 새로 모아요`, stale && " · 업데이트가 늦어지고 있어요"));
     } else {
       lines.push(el("p", { class: "stale" }, "아직 뉴스를 수집하지 않았어요. 잠시 뒤 새로고침해 주세요."));
     }
@@ -370,7 +322,7 @@
     lines.push(
       el("p", {}, "출처: 각 언론사 RSS · 날씨: Open-Meteo"),
       el("p", {}, "AI 요약은 틀릴 수 있어요. 정확한 내용은 원문에서 확인해 주세요."),
-      el("p", {}, "관심사와 읽은 기록은 추천을 위해 이 서버에 저장돼요. 설정에서 언제든 지울 수 있어요."));
+      el("p", {}, "관심사와 읽은 기록은 추천을 위해 이 기기와 서버(Netlify)에 저장돼요. 설정에서 언제든 지울 수 있어요."));
     $("foot").replaceChildren(...lines);
   }
 
@@ -648,6 +600,8 @@
     }
     renderTabs();
     renderFoot();
+    // 직접 입력한 관심사의 벡터가 도착하면 (처음엔 키워드 방식) 추천을 다시 계산
+    api.onChange(() => loadRecs().catch(() => {}));
     await Promise.all([loadRecs().catch(renderOffline), loadList()]);
     if (!state.profile.onboarded) openSheet("sheet-onboarding");
   }

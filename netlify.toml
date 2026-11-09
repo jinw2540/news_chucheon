@@ -1,0 +1,21 @@
+# 아침 브리핑 — Netlify 설정 (PLAN.md 7장)
+# 빌드는 하지 않음: 데이터 파일(static/data)은 GitHub Actions가 1시간마다 만들어 이 설정으로 배포함.
+# 그래서 Netlify 사이트를 GitHub 저장소와 '자동 배포'로 연결하지 말 것 (데이터 없이 배포되어 화면이 비게 됨).
+[build]
+  publish = "static"
+  functions = "netlify/functions"
+
+[functions]
+  node_bundler = "esbuild"
+
+# 데이터 파일은 매시간 바뀌므로 브라우저가 매번 바뀌었는지 확인 (안 바뀌었으면 다시 받지 않음)
+[[headers]]
+  for = "/data/*"
+  [headers.values]
+    Cache-Control = "public, max-age=0, must-revalidate"
+
+# 파이프라인 내부용 파일은 화면에 필요 없음 (다음 실행 때 파이프라인이 읽음)
+[[headers]]
+  for = "/data/state.json"
+  [headers.values]
+    X-Robots-Tag = "noindex"

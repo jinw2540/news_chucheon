@@ -63,6 +63,7 @@ def _zscore(x: np.ndarray) -> np.ndarray:
 class Group:
     """관심사 하나(또는 좋아요 취향)에 대한 오늘 기사들의 점수."""
     key: str                 # 관심사 글, 또는 BEHAVIOR_KEY
+    method: str              # vector: 벡터 z점수 / keyword: 글자 일치 점수 (벡터가 아직 없는 관심사)
     reason: dict
     z: np.ndarray            # 관심 점수 (z점수 + 제목 키워드 가산)
     need: float              # 이 이상이어야 관련 있음
@@ -83,7 +84,10 @@ class Context:
 
 
 def _coverage(pool: list[dict], M: np.ndarray | None) -> np.ndarray:
-    """기사마다 같은 사건을 다룬 '다른 언론사' 수. 많을수록 그날의 주요 뉴스."""
+    """기사마다 같은 사건을 다룬 '다른 언론사' 수. 많을수록 그날의 주요 뉴스.
+    파이프라인이 미리 계산해 둔 값('cov')이 있으면 그것을 씀 (브라우저 JS 버전과 같은 값을 쓰기 위해)."""
+    if pool and all("cov" in a for a in pool):
+        return np.array([a["cov"] for a in pool], dtype=int)
     if M is None:
         return np.zeros(len(pool), dtype=int)
     same = (M @ M.T) >= SIMILAR_VECTOR
@@ -111,13 +115,16 @@ def _expand(M: np.ndarray, v: np.ndarray, text: str, docs: list[str], z_needed: 
 
 
 def build_context(articles: list[dict], likes: list[tuple], dislikes: list[tuple],
-                  liked: list[tuple], disliked_vecs: list[np.ndarray]) -> Context:
+                  liked: list[tuple], disliked_vecs: list[np.ndarray], now: datetime | None = None) -> Context:
     """articles: 최근 기사(숨김·별로 제외, 'vec' 포함 가능). likes/dislikes: [(글, 벡터|None)]
-    liked: [(제목, 벡터)] 좋아요한 기사 (최근 순)"""
-    now = datetime.now(KST)
+    liked: [(제목, 벡터)] 좋아요한 기사 (최근 순). now: 기준 시각 (일치 시험에서 고정)"""
+    now = now or datetime.now(KST)
     since = now - timedelta(hours=RECENT_HOURS)
     pool = [a for a in articles if datetime.fromisoformat(a["published_at"]) >= since]
     vec_ready = bool(pool) and all(a.get("vec") is not None for a in pool)
+    if vec_ready:   # JS(64비트 실수)와 같은 정밀도로 계산
+        for a in pool:
+            a["vec"] = np.asarray(a["vec"], np.float64)
     M = np.vstack([a["vec"] for a in pool]) if vec_ready else None
     for a, cov in zip(pool, _coverage(pool, M)):
         a["_age_h"] = (now - datetime.fromisoformat(a["published_at"])).total_seconds() / 3600
@@ -128,54 +135,56 @@ def build_context(articles: list[dict], likes: list[tuple], dislikes: list[tuple
     if not personal or not pool:
         return Context(pool=pool, mode="latest", M=M, liked=liked, penalty=np.zeros(len(pool)))
 
-    use_vec = vec_ready and all(v is not None for _, v in [*likes, *dislikes])
-    ctx = Context(pool=pool, mode="vector" if use_vec else "keyword", M=M if use_vec else None, liked=liked)
+    ctx = Context(pool=pool, mode="vector" if vec_ready else "keyword", M=M, liked=liked)
     titles = [_norm(a["title"]) for a in pool]
     summaries = [_norm(a.get("rss_summary") or "") for a in pool]
     docs = [t + s for t, s in zip(titles, summaries)]
     ctx.penalty = np.zeros(len(pool))
+    fresh_vec = -np.array([a["_age_h"] for a in pool]) / RECENT_HOURS  # 최신일수록 덜 깎음 (최대 -1)
+    fresh_kw = -np.array([a["_age_h"] for a in pool]) / 12
 
-    if use_vec:
-        fresh = -np.array([a["_age_h"] for a in pool]) / RECENT_HOURS  # 최신일수록 덜 깎음 (최대 -1)
-        for text, v in dislikes:
-            u, need = _expand(M, v, text, docs, DISLIKE_Z)
+    def keyword_scores(text):
+        """벡터가 없을 때: 관심사 글자가 제목(2점)·요약문(1.2점)에 있는지."""
+        k = _norm(text)
+        title_hit = np.array([k in t for t in titles])
+        base = np.where(title_hit, 2.0, np.array([1.2 if k in s_ else 0.0 for s_ in summaries]))
+        return base, title_hit
+
+    # 관심 없는 것
+    for text, v in dislikes:
+        if vec_ready and v is not None:
+            u, need = _expand(M, np.asarray(v, np.float64), text, docs, DISLIKE_Z)
             hit = (_zscore(M @ u) >= need) | np.array([_norm(text) in t for t in titles])
-            ctx.blocked_by.append((text, hit))
-            ctx.penalty -= 3.0 * hit
-        if len(disliked_vecs) >= 2:
-            u = np.mean(disliked_vecs, axis=0)
-            hit = _zscore(M @ (u / np.linalg.norm(u))) >= MATCH_Z
-            ctx.blocked_by.append(("별로예요 누른 기사", hit))
-            ctx.penalty -= 2.0 * hit
-        for text, v in likes:
-            u, need = _expand(M, v, text, docs, MATCH_Z)
+        else:
+            hit = np.array([_norm(text) in d for d in docs])
+        ctx.blocked_by.append((text, hit))
+        ctx.penalty -= 3.0 * hit
+    if vec_ready and len(disliked_vecs) >= 2:
+        u = np.mean(np.asarray(disliked_vecs, np.float64), axis=0)
+        hit = _zscore(M @ (u / np.linalg.norm(u))) >= MATCH_Z
+        ctx.blocked_by.append(("별로예요 누른 기사", hit))
+        ctx.penalty -= 2.0 * hit
+
+    # 관심사: 벡터가 있으면 벡터, 아직 없으면(직접 입력 직후 등) 키워드
+    for text, v in likes:
+        reason = {"kind": "interest", "label": f"관심사 · {text}"}
+        if vec_ready and v is not None:
+            u, need = _expand(M, np.asarray(v, np.float64), text, docs, MATCH_Z)
             title_hit = np.array([_norm(text) in t for t in titles])
             z = _zscore(M @ u) + TITLE_KEYWORD_BONUS * title_hit
-            ctx.groups.append(Group(text, {"kind": "interest", "label": f"관심사 · {text}"},
-                                    z, need, title_hit, z >= need, z + ctx.penalty + fresh))
-        if len(liked) >= MIN_LIKES_FOR_BEHAVIOR:
-            vecs = np.array([v for _, v in liked])
-            w = 0.9 ** np.arange(len(vecs))          # 최근 좋아요일수록 크게
-            u = (vecs * w[:, None]).sum(0)
-            z = _zscore(M @ (u / np.linalg.norm(u)))
-            not_liked = np.array([not a.get("liked") for a in pool])  # 좋아요한 기사 자신은 다시 추천하지 않음
-            ctx.groups.append(Group(BEHAVIOR_KEY, {"kind": "interest", "label": "좋아요한 기사와 비슷해요"},
-                                    z, MATCH_Z, np.zeros(len(pool), bool), (z >= MATCH_Z) & not_liked,
-                                    z + ctx.penalty + fresh))
-    else:
-        # 모델이 없을 때: 관심사 글자가 제목(2점)·요약문(1.2점)에 있는지
-        fresh = -np.array([a["_age_h"] for a in pool]) / 12
-        for text, _ in dislikes:
-            k = _norm(text)
-            hit = np.array([k in d for d in docs])
-            ctx.blocked_by.append((text, hit))
-            ctx.penalty -= 3.0 * hit
-        for text, _ in likes:
-            k = _norm(text)
-            title_hit = np.array([k in t for t in titles])
-            base = np.where(title_hit, 2.0, np.array([1.2 if k in s else 0.0 for s in summaries]))
-            ctx.groups.append(Group(text, {"kind": "interest", "label": f"관심사 · {text}"},
-                                    base, 1.0, title_hit, base > 0, base + ctx.penalty + fresh))
+            ctx.groups.append(Group(text, "vector", reason, z, need, title_hit, z >= need, z + ctx.penalty + fresh_vec))
+        else:
+            base, title_hit = keyword_scores(text)
+            ctx.groups.append(Group(text, "keyword", reason, base, 1.0, title_hit, base > 0, base + ctx.penalty + fresh_kw))
+    if vec_ready and len(liked) >= MIN_LIKES_FOR_BEHAVIOR:
+        vecs = np.asarray([v for _, v in liked], np.float64)
+        w = 0.9 ** np.arange(len(vecs))          # 최근 좋아요일수록 크게
+        u = (vecs * w[:, None]).sum(0)
+        z = _zscore(M @ (u / np.linalg.norm(u)))
+        not_liked = np.array([not a.get("liked") for a in pool])  # 좋아요한 기사 자신은 다시 추천하지 않음
+        ctx.groups.append(Group(BEHAVIOR_KEY, "vector", {"kind": "interest", "label": "좋아요한 기사와 비슷해요"},
+                                z, MATCH_Z, np.zeros(len(pool), bool), (z >= MATCH_Z) & not_liked,
+                                z + ctx.penalty + fresh_vec))
     return ctx
 
 
@@ -218,7 +227,7 @@ def recommend(ctx: Context) -> list[dict]:
     pool = ctx.pool
     index = {id(a): i for i, a in enumerate(pool)}
     # 주요도: 여러 언론사가 다룬 기사일수록, 최신일수록 앞으로 (모델이 없으면 최신순과 같음)
-    latest = sorted(pool, key=lambda a: -min(a["_cov"], 10) + a["_age_h"] / 4)
+    latest = sorted(pool, key=lambda a: -min(a["_cov"], 10) + a["_age_h"] / 4)   # sorted는 안정 정렬
     picker = _Picker()
 
     if ctx.mode == "latest":
@@ -230,7 +239,7 @@ def recommend(ctx: Context) -> list[dict]:
 
     # 관심사를 번갈아 가며 가장 점수가 높은 기사를 하나씩
     personal_slots = LIMIT - len(EXPLORE_SLOTS)
-    queues = [(g.reason, [i for i in np.argsort(-g.score) if g.ok[i]]) for g in ctx.groups]
+    queues = [(g.reason, [int(i) for i in np.argsort(-g.score, kind="stable") if g.ok[i]]) for g in ctx.groups]
     pos = [0] * len(queues)
     while len(picker.picks) < personal_slots:
         progressed = False
@@ -284,7 +293,7 @@ def explain(ctx: Context, pick: dict) -> dict:
     bars = []
     for g in ctx.groups:
         # 막대 길이: z점수 0 이하면 빈 막대, 관련 기준(need)에 닿으면 가득 (키워드 방식은 점수/2)
-        full = g.need if ctx.mode == "vector" else 2.0
+        full = g.need if g.method == "vector" else 2.0
         bars.append({
             "label": "좋아요 취향" if g.key == BEHAVIOR_KEY else g.key,
             "top_percent": _top_percent(g.z, i),
@@ -367,7 +376,7 @@ def _map_points(ctx: Context, rec_idx: set[int]) -> dict:
     ay = np.array([math.sin(t) for t in angles])
     xs, ys = (ax @ W) / denom, (ay @ W) / denom
     # 점이 너무 많으면 화면이 뭉개지므로: 추천 기사 + 관심사와 가까운 기사 + 나머지 일부
-    near = set(np.argsort(-Z.max(0))[:160].tolist())
+    near = set(np.argsort(-Z.max(0), kind="stable")[:160].tolist())
     rest = [i for i in range(len(ctx.pool)) if i not in near and i not in rec_idx][:: max(1, len(ctx.pool) // 120)]
     chosen = sorted(rec_idx | near | set(rest))
     points = []

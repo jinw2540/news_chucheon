@@ -1,0 +1,62 @@
+# 매일 아침 7시(한국 시각): 사용자 데이터 내보내기 → 뉴스 수집·벡터·AI 요약 → Netlify 배포 (PLAN.md 7-1, 7-2)
+name: 매일 아침 7시 뉴스 갱신
+
+on:
+  schedule:
+    - cron: "0 22 * * *"         # UTC 22:00 = 한국 시각 07:00 (GitHub 사정으로 몇 분~수십 분 늦을 수 있음)
+  workflow_dispatch:              # 손으로 실행
+  push:
+    branches: [main]
+    paths: ["static/**", "netlify/**", "app/**", "pipeline/**", "netlify.toml", "package*.json", ".github/workflows/daily.yml"]
+
+concurrency:
+  group: daily-build              # 겹쳐 실행하지 않음
+  cancel-in-progress: false
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      SITE_URL: ${{ vars.SITE_URL }}                       # 예: https://내사이트.netlify.app (이전 데이터를 여기서 받음)
+      NETLIFY_SITE_ID: ${{ secrets.NETLIFY_SITE_ID }}
+      NETLIFY_AUTH_TOKEN: ${{ secrets.NETLIFY_AUTH_TOKEN }}
+      OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+      EMBED_VARIANT: fp32                                  # Hugging Face API와 같은 벡터
+      COLLECT_INTERVAL_HOURS: "24"                         # 하루 한 번 수집 → 시각 없는 기사는 시각을 숨김
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: requirements-pipeline.txt
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+
+      - name: 모델 파일 캐시 (e5-small 32비트 470MB, 매번 받지 않게)
+        uses: actions/cache@v4
+        with:
+          path: models
+          key: e5-small-fp32-v1
+
+      - name: 패키지 설치
+        run: |
+          pip install -r requirements-pipeline.txt
+          npm ci
+
+      - name: Netlify Blobs에서 사용자 관심사·행동 기록 내보내기
+        run: node pipeline/blobs.mjs export users.json
+
+      - name: 데이터 만들기 (수집 → 벡터 → 사용자별 추천 후보 요약)
+        run: python -m pipeline.build --prev "$SITE_URL" --users users.json --out static/data
+
+      - name: 추천 일치 시험 (Python ↔ JavaScript)
+        run: python -m tests.parity.run static/data
+
+      - name: Netlify에 배포
+        run: npx --yes netlify-cli@27.16.2 deploy --prod --dir static --functions netlify/functions --message "daily $(date -u +%Y-%m-%dT%H:%MZ)"

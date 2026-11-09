@@ -70,7 +70,23 @@ def reset_stuck() -> None:
 
 
 def enqueue(article_ids: list[int]) -> list[int]:
-    """요약이 필요한 기사를 대기열에 넣고, 넣은 id 목록을 돌려준다."""
+    """(로컬 서버용) 요약이 필요한 기사를 대기열에 넣고 바로 돌아온다. 넣은 id 목록을 돌려준다."""
+    ids = _claim(article_ids)
+    for aid in ids:
+        _pool.submit(_work, aid)
+    return ids
+
+
+def summarize_now(article_ids: list[int]) -> list[int]:
+    """(파이프라인용) 요약이 필요한 기사를 요약하고 모두 끝날 때까지 기다린다."""
+    ids = _claim(article_ids)
+    with ThreadPoolExecutor(max_workers=3, thread_name_prefix="summary-now") as ex:
+        list(ex.map(_work, ids))
+    return ids
+
+
+def _claim(article_ids: list[int]) -> list[int]:
+    """요약할 기사를 골라 pending으로 표시하고 오늘 사용량을 올린다 (하루 상한 안에서)."""
     if not enabled() or not article_ids:
         return []
     with db.session() as conn:
@@ -90,8 +106,6 @@ def enqueue(article_ids: list[int]) -> list[int]:
             return []
         conn.executemany("UPDATE articles SET summary_status = 'pending' WHERE id = ?", [(i,) for i in ids])
         db.set_meta(conn, _today_key(), str(used + len(ids)))
-    for aid in ids:
-        _pool.submit(_work, aid)
     return ids
 
 

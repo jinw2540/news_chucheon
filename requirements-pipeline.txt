@@ -1,0 +1,7 @@
+# GitHub Actions 파이프라인용 (웹 서버 패키지 없음) — pipeline/build.py
+httpx
+numpy
+onnxruntime
+tokenizers
+trafilatura
+openai

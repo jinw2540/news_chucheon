@@ -13,7 +13,7 @@ router = APIRouter(prefix="/api")
 USER = db.DEFAULT_USER_ID
 PER_SOURCE_IN_TAB = 5
 
-SUGGESTED_INTERESTS = ["반도체", "부동산", "AI", "야구", "환율", "기후", "게임", "교육", "전기차", "우주", "건강", "여행"]
+from .interests import SUGGESTED_INTERESTS  # noqa: E402  (파이프라인과 같은 목록)
 
 ARTICLE_SQL = """
 SELECT a.id, a.source, a.title, a.link, a.rss_summary, a.published_at, a.has_time,

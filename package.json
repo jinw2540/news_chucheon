@@ -1,0 +1,12 @@
+{
+  "name": "morning-briefing",
+  "private": true,
+  "description": "아침 브리핑 — Netlify 함수와 Blobs 도구 (Python 파이프라인은 pipeline/, 화면은 static/)",
+  "scripts": {
+    "export-users": "node pipeline/blobs.mjs export users.json",
+    "parity": ".venv/bin/python -m tests.parity.run"
+  },
+  "dependencies": {
+    "@netlify/blobs": "11.1.8"
+  }
+}

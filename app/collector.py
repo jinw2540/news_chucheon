@@ -8,6 +8,7 @@
 """
 import html
 import json
+import os
 import logging
 import re
 import time
@@ -35,6 +36,9 @@ HANGUL = re.compile(r"[가-힣]")
 TRACKING_PARAMS = {"plink", "cooper"}   # SBS가 같은 기사에 붙였다 뗐다 하는 추적용 값
 PHOTO_TITLE = re.compile(r"^\s*\[\s*(포토|사진|화보|영상)\s*\]")   # 사진·영상만 있는 기사는 제외
 UNKNOWN_AGE = timedelta(hours=6)  # 첫 수집 때 시각을 모르는 기사는 이만큼 지난 것으로 추정
+# 수집 간격(시간). 로컬 서버는 1시간마다, GitHub Actions는 하루 한 번(24) → 간격이 길면 '처음 본 시각'이
+# 실제 발행 시각과 크게 달라지므로, 시각 없는 기사는 매번 시각을 숨기고 추정값으로 정렬
+COLLECT_INTERVAL_HOURS = float(os.getenv("COLLECT_INTERVAL_HOURS", "1"))
 # 요약문 앞의 기자 머리말: "[서울=뉴시스] 홍길동 기자 =", "(서울=연합뉴스) 홍길동 기자 =" 등
 BYLINE = re.compile(
     r"^\s*(?:[\[\(【][^\]\)】=]{1,20}=[^\]\)】]{1,20}[\]\)】]\s*)?"
@@ -129,7 +133,7 @@ def save_items(conn, feed: dict, items: list[dict], now: datetime, first_time: b
             # 시각이 없는 피드(한겨레 등): 처음 본 시각을 사용 (서버가 계속 수집하므로 실제와 비슷).
             # 단, 피드를 처음 수집할 때는 예전 기사까지 섞여 있으므로
             # 정렬용으로 6시간 전으로 추정하고 화면에서는 시각을 숨김
-            if first_time:
+            if first_time or COLLECT_INTERVAL_HOURS > 2:
                 published, has_time = (now - UNKNOWN_AGE).isoformat(timespec="seconds"), 0
             else:
                 published, has_time = now_iso, 1

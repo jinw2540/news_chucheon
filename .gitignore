@@ -8,3 +8,10 @@ models/
 
 # API 키
 .env
+
+# Node
+node_modules/
+.netlify/
+
+# 파이프라인 임시 파일
+users.json
