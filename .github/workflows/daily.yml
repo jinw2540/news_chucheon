@@ -1,9 +1,12 @@
-# 매일 아침 7시(한국 시각): 사용자 데이터 내보내기 → 뉴스 수집·벡터·AI 요약 → Netlify 배포 (PLAN.md 7-1, 7-2)
-name: 매일 아침 7시 뉴스 갱신
+# 하루 세 번(한국 시각 07시·13시·19시): 사용자 데이터 내보내기 → 뉴스 수집·벡터·AI 요약 → Netlify 배포 (PLAN.md 7-7-1)
+name: 하루 세 번 뉴스 갱신
 
 on:
   schedule:
-    - cron: "0 22 * * *"         # UTC 22:00 = 한국 시각 07:00 (GitHub 사정으로 몇 분~수십 분 늦을 수 있음)
+    # GitHub 예약은 UTC 기준 (한국 = UTC+9). GitHub 사정으로 몇 분~수십 분 늦을 수 있음
+    - cron: "0 22 * * *"         # 한국 07:00
+    - cron: "0 4 * * *"          # 한국 13:00
+    - cron: "0 10 * * *"         # 한국 19:00
   workflow_dispatch:              # 손으로 실행
   push:
     branches: [main]
@@ -23,8 +26,23 @@ jobs:
       NETLIFY_AUTH_TOKEN: ${{ secrets.NETLIFY_AUTH_TOKEN }}
       OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
       EMBED_VARIANT: fp32                                  # Hugging Face API와 같은 벡터
-      COLLECT_INTERVAL_HOURS: "24"                         # 하루 한 번 수집 → 시각 없는 기사는 시각을 숨김
+      COLLECT_INTERVAL_HOURS: "6"                          # 6~12시간 간격 수집 → 시각 없는 기사는 시각을 숨김
     steps:
+      - name: 설정 확인 (값은 출력하지 않고 비어 있는지만)
+        env:
+          OPENAI_API_KEY_SET: ${{ secrets.OPENAI_API_KEY != '' }}
+        run: |
+          missing=""
+          [ -z "$NETLIFY_SITE_ID" ] && missing="$missing NETLIFY_SITE_ID"
+          [ -z "$NETLIFY_AUTH_TOKEN" ] && missing="$missing NETLIFY_AUTH_TOKEN"
+          if [ -n "$missing" ]; then
+            echo "::error::Repository secrets가 비어 있어요:$missing — Settings → Secrets and variables → Actions → Secrets 탭에 등록해 주세요 (Variables 탭이나 Environment secrets가 아님)"
+            exit 1
+          fi
+          [ "$OPENAI_API_KEY_SET" = "true" ] || echo "::warning::OPENAI_API_KEY가 없어 AI 요약을 건너뜀 (Secrets 탭)"
+          [ -n "$SITE_URL" ] || echo "::warning::SITE_URL(Variables 탭)이 없어 이전 데이터를 이어 받지 못하고 처음부터 만듦 — 첫 배포 뒤 꼭 등록"
+          echo "설정 확인 완료"
+
       - uses: actions/checkout@v4
 
       - uses: actions/setup-python@v5
@@ -59,4 +77,4 @@ jobs:
         run: python -m tests.parity.run static/data
 
       - name: Netlify에 배포
-        run: npx --yes netlify-cli@27.16.2 deploy --prod --dir static --functions netlify/functions --message "daily $(date -u +%Y-%m-%dT%H:%MZ)"
+        run: npx --yes netlify-cli@27.16.2 deploy --prod --dir static --functions netlify/functions --message "scheduled $(date -u +%Y-%m-%dT%H:%MZ)"

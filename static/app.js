@@ -312,9 +312,9 @@
     const lines = [];
     if (updated) {
       const t = new Date(updated).toLocaleString("ko-KR", { month: "numeric", day: "numeric", hour: "numeric", minute: "2-digit" });
-      const stale = Date.now() - Date.parse(updated) > 26 * 3600 * 1000;   // 매일 07시 갱신 + 여유
+      const stale = Date.now() - Date.parse(updated) > 14 * 3600 * 1000;   // 가장 긴 간격(19시→07시 12시간) + 여유
       lines.push(el("p", { class: stale ? "stale" : null },
-        `뉴스 업데이트 ${t} · 매일 오전 7시에 새로 모아요`, stale && " · 업데이트가 늦어지고 있어요"));
+        `뉴스 업데이트 ${t} · 매일 오전 7시·오후 1시·오후 7시에 새로 모아요`, stale && " · 업데이트가 늦어지고 있어요"));
     } else {
       lines.push(el("p", { class: "stale" }, "아직 뉴스를 수집하지 않았어요. 잠시 뒤 새로고침해 주세요."));
     }

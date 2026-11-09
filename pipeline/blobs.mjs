@@ -9,7 +9,11 @@ const EVENT_DAYS = 30;   // 최근 30일 행동 기록만
 function store(name) {
   const siteID = process.env.NETLIFY_SITE_ID;
   const token = process.env.NETLIFY_AUTH_TOKEN;
-  if (!siteID || !token) throw new Error("NETLIFY_SITE_ID와 NETLIFY_AUTH_TOKEN이 필요해요");
+  const missing = [!siteID && "NETLIFY_SITE_ID", !token && "NETLIFY_AUTH_TOKEN"].filter(Boolean);
+  if (missing.length) {
+    throw new Error(`${missing.join(", ")} 값이 비어 있어요. GitHub 저장소 → Settings → Secrets and variables → ` +
+      "Actions → 'Secrets' 탭(Variables 탭이 아님)의 'Repository secrets'에 같은 이름으로 등록해 주세요.");
+  }
   return getStore({ name, siteID, token });
 }
 
